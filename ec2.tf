@@ -51,6 +51,7 @@ resource "aws_instance" "webserver" {
                 sudo systemctl start httpd
                 sudo systemctl enable httpd
                 sudo yum install git -y
+                sudo setenforce 0
                 EOF
 
   tags = {
