@@ -146,12 +146,6 @@ resource "aws_cloudfront_distribution" "webcloud" {
       origin_access_identity = aws_cloudfront_origin_access_identity.origin_access_identity.cloudfront_access_identity_path
     }
 
-  custom_origin_config {
-    http_port = 80
-    https_port = 80
-    origin_protocol_policy = "match-viewer"
-    origin_ssl_protocols = ["TLSv1", "TLSv1.1", "TLSv1.2"] 
-    }
   }
 
   enabled = true
