@@ -3,6 +3,14 @@ provider "aws" {
   profile    = "rajnish"
 }
 
+resource "tls_private_key" "prkey" {
+  algorithm  = "RSA"
+}
+
+resource "aws_key_pair" "webkey1" {
+  key_name   = "webkey1"
+  public_key = tls_private_key.prkey.public_key_openssh
+}
 
 
 resource "aws_security_group" "allow_80" {
@@ -79,16 +87,18 @@ resource "aws_volume_attachment" "ebs_att" {
 
 
 resource "null_resource" "remote"  {
+  depends_on = [
+    aws_volume_attachment.ebs_att,
+  ]
   connection {
     type     = "ssh"
     user     = "ec2-user"
-    private_key = file("C:/Users/Rajnish - The Great/Downloads/webkey1.pem")
+    private_key = tls_private_key.prkey.private_key_pem
     host     = aws_instance.webserver.public_ip
   }
 
   provisioner "remote-exec" {
     inline = [
-      "sudo su - root",
       "sudo mkfs.ext4  /dev/xvdr",
       "sudo mount  /dev/xvdr  /var/www/html",
       "sudo rm -rf /var/www/html/*",
@@ -111,11 +121,13 @@ resource "aws_s3_bucket" "s3bucket" {
 
 resource "aws_s3_bucket_public_access_block" "s3type" {
   bucket = "${aws_s3_bucket.s3bucket.id}"
-  block_public_acls   = false
-  block_public_policy = false
+  block_public_acls   = true
+  block_public_policy = true
 }
 
-
+resource "aws_cloudfront_origin_access_identity" "origin_access_identity" {
+  depends_on = [aws_s3_bucket.s3bucket]
+}
 
 
 
@@ -126,15 +138,13 @@ locals {
 
 
 
-
-
-
-
 resource "aws_cloudfront_distribution" "webcloud" {
   origin {
     domain_name = "${aws_s3_bucket.s3bucket.bucket_regional_domain_name}"
     origin_id   = "${local.s3_origin_id}"
-
+    s3_origin_config{
+      origin_access_identity = aws_cloudfront_origin_access_identity.origin_access_identity.cloudfront_access_identity_path
+    }
 
   custom_origin_config {
     http_port = 80
@@ -152,10 +162,10 @@ resource "aws_cloudfront_distribution" "webcloud" {
     target_origin_id = "${local.s3_origin_id}"
 
     forwarded_values {
-    query_string = false
+      query_string = false
 
-    cookies {
-      forward = "none"
+      cookies {
+        forward = "none"
       }
     }
 
