@@ -51,17 +51,7 @@ resource "aws_instance" "webserver" {
   availability_zone = aws_ebs_volume.web_volume.availability_zone
   key_name      = "webkey1"
   security_groups = ["${aws_security_group.allow_80.name}"]
-  user_data = <<-EOF
-                #! /bin/bash
-                sudo su - root
-                sudo yum install httpd -y
-                sudo yum install php -y
-                sudo systemctl start httpd
-                sudo systemctl enable httpd
-                sudo yum install git -y
-                sudo setenforce 0
-                EOF
-
+ 
   tags = {
     Name = "WebOS"
   }
@@ -78,6 +68,31 @@ resource "aws_ebs_volume" "web_volume" {
 }
 
 
+
+resource "null_resource" "imp_soft"  {
+  depends_on = [aws_instance.webserver,
+                aws_volume_attachment.ebs_att]
+  connection {
+    type     = "ssh"
+    user     = "ec2-user"
+    private_key =tls_private_key.prkey.private_key_pem
+    host     = aws_instance.webserver.public_ip
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo yum install httpd -y",
+      "sudo yum install php -y",
+      "sudo systemctl start httpd",
+      "sudo systemctl enable httpd",
+      "sudo yum install git -y",
+      "sudo setenforce 0"
+    ]
+  }
+}
+
+
+
 resource "aws_volume_attachment" "ebs_att" {
   device_name = "/dev/sdr"
   volume_id   = aws_ebs_volume.web_volume.id
@@ -86,14 +101,13 @@ resource "aws_volume_attachment" "ebs_att" {
 }
 
 
-resource "null_resource" "remote"  {
-  depends_on = [
-    aws_volume_attachment.ebs_att,
-  ]
+resource "null_resource" "mount"  {
+  depends_on = [aws_volume_attachment.ebs_att,
+                null_resource.imp_soft]
   connection {
     type     = "ssh"
     user     = "ec2-user"
-    private_key = tls_private_key.prkey.private_key_pem
+    private_key =tls_private_key.prkey.private_key_pem
     host     = aws_instance.webserver.public_ip
   }
 
@@ -131,6 +145,25 @@ resource "aws_cloudfront_origin_access_identity" "origin_access_identity" {
 
 
 
+data "aws_iam_policy_document" "s3_policy" {
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.s3bucket.arn}/*"]
+    principals {
+      type        = "AWS"
+      identifiers = [  aws_cloudfront_origin_access_identity.origin_access_identity.iam_arn ]
+    }
+  }
+}
+
+
+
+resource "aws_s3_bucket_policy" "policy" {
+bucket = aws_s3_bucket.s3bucket.id
+policy = data.aws_iam_policy_document.s3_policy.json
+}
+
+
 locals {
   s3_origin_id = "myS3Origin"
 }
@@ -145,11 +178,9 @@ resource "aws_cloudfront_distribution" "webcloud" {
     s3_origin_config{
       origin_access_identity = aws_cloudfront_origin_access_identity.origin_access_identity.cloudfront_access_identity_path
     }
-
   }
-
   enabled = true
-
+  is_ipv6_enabled     = true
   default_cache_behavior {
     allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods   = ["GET", "HEAD"]
@@ -185,3 +216,5 @@ resource "null_resource" "wepip"  {
 	    command = "echo  ${aws_instance.webserver.public_ip} > publicip.txt"
   	}
 }
+
+
